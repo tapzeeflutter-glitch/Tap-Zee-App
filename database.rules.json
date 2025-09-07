@@ -1,0 +1,14 @@
+{
+  "rules": {
+    "chats": {
+      "$roomId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "rooms": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    }
+  }
+}

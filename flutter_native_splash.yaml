@@ -1,0 +1,605 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:myapp/models/room.dart';
+import 'package:myapp/models/message.dart';
+import 'package:myapp/services/hive_service.dart';
+import 'package:myapp/services/user_location_service.dart';
+import 'package:myapp/widgets/user_marker_widget.dart';
+
+class RoomChatScreen extends StatefulWidget {
+  final Room room;
+
+  const RoomChatScreen({super.key, required this.room});
+
+  @override
+  State<RoomChatScreen> createState() => _RoomChatScreenState();
+}
+
+class _RoomChatScreenState extends State<RoomChatScreen> {
+  final _messageController = TextEditingController();
+  final _auth = FirebaseAuth.instance;
+  final _firestore = FirebaseFirestore.instance;
+  final _storage = FirebaseStorage.instance;
+  List<Message> _messages = []; // Use Message model
+  String? _errorMessage;
+  bool _canShareFiles = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkFileSharingPermission();
+    _loadMessagesFromHive();
+  }
+
+  @override
+  void dispose() {
+    _messageController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadMessagesFromHive() async {
+    // Load messages from Hive when the chat screen is initialized
+    final messages = HiveService.getMessagesForRoom(widget.room.id);
+    // You might want to sort the messages by timestamp as well
+    setState(() {
+      _messages = messages;
+    });
+  }
+
+  Future<void> _checkFileSharingPermission() async {
+    // For simplicity, only admin can grant permission to share files.
+    // In a real app, this would involve a field in the Room model.
+    // For now, only the admin of the room can share files.
+    setState(() {
+      _canShareFiles = _auth.currentUser?.uid == widget.room.adminUid;
+    });
+  }
+
+  Future<void> _sendMessage() async {
+    if (_messageController.text.trim().isEmpty) return;
+
+    final user = _auth.currentUser;
+    if (user == null) {
+      setState(() {
+        _errorMessage = 'You must be logged in to send messages.';
+      });
+      return;
+    }
+
+    final messageText = _messageController.text.trim();
+
+    try {
+      Message message = Message(
+        senderId: user.uid,
+        senderEmail: user.email!,
+        text: messageText,
+        timestamp: Timestamp.now(),
+      );
+      await _firestore
+          .collection('rooms')
+          .doc(widget.room.id)
+          .collection('messages')
+          .add(message.toMap());
+
+      //Save message locally in Hive
+      await HiveService.saveMessage(message);
+      _loadMessagesFromHive(); // Reload messages after sending to show immediately from local store
+
+      _messageController.clear();
+      setState(() {
+        _errorMessage = null;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Failed to send message: $e';
+      });
+    }
+  }
+
+  Future<void> _sendFile() async {
+    if (!_canShareFiles) {
+      setState(() {
+        _errorMessage = 'You do not have permission to share files.';
+      });
+      return;
+    }
+
+    final user = _auth.currentUser;
+    if (user == null) {
+      setState(() {
+        _errorMessage = 'You must be logged in to share files.';
+      });
+      return;
+    }
+
+    try {
+      final result = await FilePicker.platform.pickFiles();
+
+      if (result != null && result.files.single.path != null) {
+        File file = File(result.files.single.path!);
+        String fileName = result.files.single.name;
+        String filePath =
+            'room_files/${widget.room.id}/${user.uid}/${fileName}';
+
+        UploadTask uploadTask = _storage.ref().child(filePath).putFile(file);
+        TaskSnapshot snapshot = await uploadTask;
+        String downloadUrl = await snapshot.ref.getDownloadURL();
+
+        Message message = Message(
+          senderId: user.uid,
+          senderEmail: user.email!,
+          text: 'Shared a file:',
+          timestamp: Timestamp.now(),
+          fileUrl: downloadUrl,
+          fileName: fileName,
+        );
+        await _firestore
+            .collection('rooms')
+            .doc(widget.room.id)
+            .collection('messages')
+            .add(message.toMap());
+
+        //Save message locally in Hive
+        await HiveService.saveMessage(message);
+        _loadMessagesFromHive(); // Reload messages after sending
+
+        setState(() {
+          _errorMessage = null;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Failed to upload file: $e';
+      });
+    }
+  }
+
+  void _launchUrl(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    } else {
+      setState(() {
+        _errorMessage = 'Could not launch $url';
+      });
+    }
+  }
+
+  // Show dialog to add nearby members to the room
+  void _showAddMembersDialog() async {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Add Nearby Members'),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 400,
+          child: FutureBuilder<List<AppUser>>(
+            future: UserLocationService.getAllOnlineUsers(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              if (snapshot.hasError) {
+                return Center(child: Text('Error: ${snapshot.error}'));
+              }
+
+              final onlineUsers = snapshot.data ?? [];
+
+              // Filter out users who are already members of this room
+              final availableUsers = onlineUsers.where((user) {
+                return !widget.room.approvedMembers.contains(user.id) &&
+                    !widget.room.pendingMembers.contains(user.id);
+              }).toList();
+
+              if (availableUsers.isEmpty) {
+                return const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.people_outline, size: 64, color: Colors.grey),
+                      SizedBox(height: 16),
+                      Text(
+                        'No nearby users available',
+                        style: TextStyle(fontSize: 16, color: Colors.grey),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'All nearby users are already members',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              return ListView.builder(
+                itemCount: availableUsers.length,
+                itemBuilder: (context, index) {
+                  final user = availableUsers[index];
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      leading: UserMarkerWidget(
+                        photoURL: user.photoURL,
+                        displayName: user.displayName ?? user.email,
+                        isOnline: user.isOnline,
+                        size: 30.0,
+                      ),
+                      title: Text(user.displayName ?? user.email),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(user.email),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Last seen: ${_formatDateTime(user.lastSeen)}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                      trailing: ElevatedButton(
+                        onPressed: () {
+                          _addUserToRoom(user);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                        ),
+                        child: const Text('Add'),
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Add user to the room
+  Future<void> _addUserToRoom(AppUser user) async {
+    try {
+      await _firestore.collection('rooms').doc(widget.room.id).update({
+        'pendingMembers': FieldValue.arrayUnion([user.id]),
+      });
+
+      // Update local room object and trigger UI update
+      setState(() {
+        widget.room.pendingMembers.add(user.id);
+      });
+
+      if (mounted) {
+        Navigator.of(context).pop(); // Close the dialog
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${user.displayName ?? user.email} invited to ${widget.room.name}!',
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to add user: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // Show room info dialog
+  void _showRoomInfo() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(widget.room.name),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Description: ${widget.room.description}'),
+            const SizedBox(height: 8),
+            Text('Members: ${widget.room.approvedMembers.length}'),
+            const SizedBox(height: 8),
+            Text('Pending: ${widget.room.pendingMembers.length}'),
+            const SizedBox(height: 8),
+            Text('Radius: ${widget.room.radius.toInt()}m'),
+            const SizedBox(height: 8),
+            Text('Created: ${_formatDateTime(widget.room.createdAt.toDate())}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Format DateTime for display
+  String _formatDateTime(DateTime dateTime) {
+    final now = DateTime.now();
+    final difference = now.difference(dateTime);
+
+    if (difference.inDays > 7) {
+      return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
+    } else if (difference.inDays > 0) {
+      return '${difference.inDays} day${difference.inDays > 1 ? 's' : ''} ago';
+    } else if (difference.inHours > 0) {
+      return '${difference.inHours} hour${difference.inHours > 1 ? 's' : ''} ago';
+    } else if (difference.inMinutes > 0) {
+      return '${difference.inMinutes} minute${difference.inMinutes > 1 ? 's' : ''} ago';
+    } else {
+      return 'Just now';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = _auth.currentUser;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.room.name),
+        actions: [
+          // Only show add members button if user is admin
+          if (widget.room.adminUid == _auth.currentUser?.uid)
+            IconButton(
+              icon: const Icon(Icons.person_add),
+              onPressed: _showAddMembersDialog,
+              tooltip: 'Add Members',
+            ),
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'room_info') {
+                _showRoomInfo();
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'room_info',
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline),
+                    SizedBox(width: 8),
+                    Text('Room Info'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          if (_errorMessage != null)
+            Container(
+              padding: const EdgeInsets.all(8.0),
+              color: Colors.red,
+              child: Center(
+                child: Text(
+                  _errorMessage!,
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+            ),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: _firestore
+                  .collection('rooms')
+                  .doc(widget.room.id)
+                  .collection('messages')
+                  .orderBy('timestamp', descending: true)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                List<Message> combinedMessages = [];
+
+                if (snapshot.hasData) {
+                  final firestoreMessages = snapshot.data!.docs
+                      .map(
+                        (doc) =>
+                            Message.fromMap(doc.data() as Map<String, dynamic>),
+                      )
+                      .toList();
+                  combinedMessages.addAll(firestoreMessages);
+                }
+
+                // Add Hive Messages - Ensure it does not duplicate existing
+                for (Message hiveMessage in _messages) {
+                  bool alreadyExists = combinedMessages.any(
+                    (firestoreMessage) =>
+                        firestoreMessage.senderId == hiveMessage.senderId &&
+                        firestoreMessage.timestamp == hiveMessage.timestamp &&
+                        firestoreMessage.text == hiveMessage.text,
+                  );
+
+                  if (!alreadyExists) {
+                    combinedMessages.add(hiveMessage);
+                  }
+                }
+
+                // Sort Combined List Descending order
+                combinedMessages.sort(
+                  (a, b) => b.timestamp.compareTo(a.timestamp),
+                );
+
+                if (combinedMessages.isEmpty) {
+                  return const Center(child: Text('No messages yet.'));
+                }
+
+                return ListView.builder(
+                  reverse: true,
+                  itemCount: combinedMessages.length,
+                  itemBuilder: (context, index) {
+                    final message = combinedMessages[index];
+                    final isMe = message.senderId == user?.uid;
+                    return Align(
+                      alignment: isMe
+                          ? Alignment.centerRight
+                          : Alignment.centerLeft,
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(
+                          vertical: 4,
+                          horizontal: 8,
+                        ),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: isMe
+                              ? Theme.of(context).primaryColor
+                              : Colors.grey[300],
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              isMe ? 'You' : message.senderEmail,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: isMe ? Colors.white : Colors.black,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              message.text,
+                              style: TextStyle(
+                                color: isMe ? Colors.white : Colors.black87,
+                              ),
+                            ),
+                            if (message.fileUrl != null &&
+                                message.fileName != null)
+                              GestureDetector(
+                                onTap: () => _launchUrl(message.fileUrl!),
+                                child: Container(
+                                  padding: const EdgeInsets.all(8.0),
+                                  margin: const EdgeInsets.only(top: 8.0),
+                                  decoration: BoxDecoration(
+                                    color: isMe
+                                        ? Colors.blue.shade700
+                                        : Colors.blue.shade100,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.attachment,
+                                        color: isMe
+                                            ? Colors.white
+                                            : Colors.blue.shade900,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Flexible(
+                                        child: Text(
+                                          message.fileName!,
+                                          style: TextStyle(
+                                            color: isMe
+                                                ? Colors.white
+                                                : Colors.blue.shade900,
+                                            decoration:
+                                                TextDecoration.underline,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${message.timestamp.toDate().hour}:${message.timestamp.toDate().minute}',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: isMe ? Colors.white70 : Colors.black54,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.attach_file),
+                  onPressed: _canShareFiles ? _sendFile : null,
+                ),
+                Expanded(
+                  child: TextField(
+                    controller: _messageController,
+                    decoration: InputDecoration(
+                      hintText: 'Enter message...',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FloatingActionButton(
+                  onPressed: _sendMessage,
+                  mini: true,
+                  child: const Icon(Icons.send),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

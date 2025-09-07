@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "603982732439",
+    "project_id": "tap-zee",
+    "storage_bucket": "tap-zee.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:603982732439:android:92382d15b24838534fddd2",
+        "android_client_info": {
+          "package_name": "com.stopic.tapzee"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "603982732439-o54jeelbafqvavp9r44s7dqkkreo1d72.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.stopic.tapzee",
+            "certificate_hash": "4eb038c08f954e3e7020b897bca1f8c7c732d212"
+          }
+        },
+        {
+          "client_id": "603982732439-e95lkltll0qm15l9ast6sfnh4shqtjf7.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAVnn7NVxRkQv-bkw89RYLQe9tyYbgKBak"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "603982732439-e95lkltll0qm15l9ast6sfnh4shqtjf7.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
