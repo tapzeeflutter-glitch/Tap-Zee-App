@@ -1,7 +1,5 @@
 # Tap-Zee-App
 
-
-
 ---
 
 ## **Prerequisites**
@@ -23,3 +21,40 @@ Before you begin, make sure you have the following installed:
 ```bash
 git clone https://github.com/tapzeeflutter-glitch/Tap-Zee-App.git
 cd Tap-Zee-App
+```
+
+### 2. Install Dependencies
+
+Fetch all required packages:
+
+```bash
+flutter pub get
+```
+
+### 3. Run the App
+
+#### Option 1: Using VS Code
+
+1. Open the project in VS Code.
+2. Select your target device or emulator from the bottom-right corner.
+3. Press F5 or go to **Run → Start Debugging**.
+
+#### Option 2: Using Terminal
+
+```bash
+flutter run
+```
+
+This will build and launch the app on the connected device.
+
+---
+
+## **Troubleshooting**
+
+- Run `flutter doctor` to verify environment setup.
+- Make sure the device/emulator is running before `flutter run`.
+- If dependencies fail:
+  ```bash
+  flutter clean
+  flutter pub get
+  ```
