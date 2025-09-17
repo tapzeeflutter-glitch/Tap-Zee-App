@@ -4,7 +4,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:latlong2/latlong.dart';
 import 'dart:async';
-import 'dart:async';
 import 'package:tapzee/widgets/enhanced_map_widget.dart';
 import 'package:tapzee/screens/create_room_screen.dart';
 import 'package:tapzee/screens/my_rooms_tab.dart';
@@ -992,13 +991,16 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                                                                             .ellipsis,
                                                                   ),
                                                                   onPressed: () async {
-                                                                    await roomDoc
-                                                                        .reference
-                                                                        .update({
-                                                                          'blockedMembers': FieldValue.arrayRemove([
+                                                                    await roomDoc.reference.update({
+                                                                      'blockedMembers':
+                                                                          FieldValue.arrayRemove([
                                                                             userId,
                                                                           ]),
-                                                                        });
+                                                                      'approvedMembers':
+                                                                          FieldValue.arrayUnion([
+                                                                            userId,
+                                                                          ]),
+                                                                    });
                                                                     await appealDoc
                                                                         .reference
                                                                         .delete();
@@ -1191,12 +1193,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showLocationTestingDialog,
-        backgroundColor: Colors.orange,
-        child: const Icon(Icons.gps_fixed),
-        tooltip: 'Location Testing',
-      ),
+      // FloatingActionButton for location testing removed. Now in user profile page.
     );
   }
 

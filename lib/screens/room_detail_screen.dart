@@ -355,17 +355,34 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
         'pendingMembers': FieldValue.arrayRemove([memberUid]),
         'approvedMembers': FieldValue.arrayUnion([memberUid]),
       });
+      // Fetch user displayName for attendance record
+      String? displayName;
+      try {
+        final userDoc = await _firestore
+            .collection('users')
+            .doc(memberUid)
+            .get();
+        if (userDoc.exists) {
+          final userData = userDoc.data() as Map<String, dynamic>?;
+          displayName = userData?['displayName'];
+        }
+      } catch (e) {
+        debugPrint('Error fetching user displayName for attendance: $e');
+      }
       final attendanceId = _firestore.collection('attendance').doc().id;
       final attendanceRecord = Attendance(
         id: attendanceId,
         roomId: widget.room.id,
         userId: memberUid,
         joinTime: Timestamp.now(),
-      );
+      ).toMap();
+      if (displayName != null) {
+        attendanceRecord['displayName'] = displayName;
+      }
       await _firestore
           .collection('attendance')
           .doc(attendanceId)
-          .set(attendanceRecord.toMap());
+          .set(attendanceRecord);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -485,11 +502,6 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
               TextField(
                 controller: descController,
                 decoration: const InputDecoration(labelText: 'Description'),
-              ),
-              TextField(
-                controller: radiusController,
-                decoration: const InputDecoration(labelText: 'Radius (meters)'),
-                keyboardType: TextInputType.number,
               ),
             ],
           ),
@@ -613,23 +625,41 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                           if (userSnapshot.hasError ||
                               !userSnapshot.hasData ||
                               !userSnapshot.data!.exists) {
-                            // Fallback to UID display if user doc not available
+                            // Try to fetch as much info as possible from the user doc, fallback to UID only if nothing is available
+                            final userData =
+                                userSnapshot.data?.data()
+                                    as Map<String, dynamic>? ??
+                                {};
+                            final name =
+                                userData['displayName'] ??
+                                userData['name'] ??
+                                userData['email'] ??
+                                memberUid;
+                            final email = userData['email'] ?? '';
+                            final photoUrl =
+                                userData['photoUrl'] ?? userData['photoURL'];
                             return ListTile(
-                              leading: isAdmin
-                                  ? const CircleAvatar(
-                                      child: Icon(
-                                        Icons.admin_panel_settings,
-                                        color: Colors.blue,
-                                      ),
+                              leading:
+                                  photoUrl != null &&
+                                      (photoUrl as String).isNotEmpty
+                                  ? CircleAvatar(
+                                      backgroundImage: NetworkImage(photoUrl),
+                                      radius: 22,
                                     )
-                                  : const CircleAvatar(
-                                      child: Icon(
-                                        Icons.person,
-                                        color: Colors.grey,
-                                      ),
+                                  : CircleAvatar(
+                                      child: isAdmin
+                                          ? const Icon(
+                                              Icons.admin_panel_settings,
+                                              color: Colors.blue,
+                                            )
+                                          : const Icon(
+                                              Icons.person,
+                                              color: Colors.grey,
+                                            ),
+                                      radius: 22,
                                     ),
-                              title: Text(memberUid),
-                              subtitle: Text('User data not available'),
+                              title: Text(name),
+                              subtitle: email.isNotEmpty ? Text(email) : null,
                               trailing: _buildStatusActions(
                                 memberUid,
                                 isAdmin,
@@ -762,7 +792,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       } else {
         children.addAll([
           IconButton(
-            icon: const Icon(Icons.remove_circle, color: Colors.red),
+            icon: const Icon(Icons.delete, color: Colors.red),
             tooltip: 'Remove member',
             onPressed: () => _removeMember(memberUid),
           ),

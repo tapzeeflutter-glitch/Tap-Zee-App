@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:tapzee/services/spam_detection_service.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:tapzee/screens/_appeal_button.dart';
 
 class BlockedUserScreen extends StatelessWidget {
   final String roomName;
@@ -117,62 +116,7 @@ class BlockedUserScreen extends StatelessWidget {
                   const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
-                    child: OutlinedButton(
-                      onPressed: () async {
-                        // Send appeal notification to room admin in Firestore
-                        try {
-                          final user = await FirebaseAuth.instance.currentUser;
-                          if (user == null) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'You must be signed in to appeal.',
-                                ),
-                              ),
-                            );
-                            return;
-                          }
-                          // Find the room document by name (ideally use roomId, but using name for now)
-                          final roomQuery = await FirebaseFirestore.instance
-                              .collection('rooms')
-                              .where('name', isEqualTo: roomName)
-                              .limit(1)
-                              .get();
-                          if (roomQuery.docs.isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Room not found.')),
-                            );
-                            return;
-                          }
-                          final roomDoc = roomQuery.docs.first;
-                          // Add appeal request to a subcollection or field for admin
-                          await roomDoc.reference.collection('appeals').add({
-                            'userId': user.uid,
-                            'userName': user.displayName ?? 'Unknown',
-                            'timestamp': FieldValue.serverTimestamp(),
-                            'reason': 'Blocked by spam detection',
-                          });
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Appeal sent to room admin.'),
-                            ),
-                          );
-                        } catch (e) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Failed to send appeal: $e'),
-                            ),
-                          );
-                        }
-                      },
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
-                      child: const Text(
-                        'Appeal Block',
-                        style: TextStyle(fontSize: 16),
-                      ),
-                    ),
+                    child: AppealButton(roomName: roomName),
                   ),
                 ],
               ),

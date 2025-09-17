@@ -16,6 +16,23 @@ class UserProfilePage extends StatefulWidget {
 }
 
 class _UserProfilePageState extends State<UserProfilePage> {
+  void _showLocationTestingDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
+          child: LocationTestingWidget(
+            onLocationChanged: (location) {
+              // This callback is now handled by the service callback
+              // but we can add additional logic here if needed
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
   final _auth = FirebaseAuth.instance;
   final _firestore = FirebaseFirestore.instance;
   User? _user;
@@ -433,6 +450,18 @@ class _UserProfilePageState extends State<UserProfilePage> {
               padding: const EdgeInsets.all(16.0),
               child: Column(
                 children: [
+                  // Location Testing Button (moved from FAB)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.gps_fixed, color: Colors.orange),
+                      label: const Text(
+                        'Location Testing',
+                        style: TextStyle(color: Colors.orange),
+                      ),
+                      onPressed: _showLocationTestingDialog,
+                    ),
+                  ),
                   // Profile Header
                   Container(
                     width: double.infinity,
