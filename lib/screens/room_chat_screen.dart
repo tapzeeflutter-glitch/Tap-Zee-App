@@ -250,7 +250,7 @@ class _RoomChatScreenState extends State<RoomChatScreen> {
                   const SizedBox(height: 12),
 
                   Text(
-                    'Confidence: ${(spamResult.confidence.toDouble() * 100).toStringAsFixed(0)}%',
+                    'Confidence: ${spamResult.confidence.toStringAsFixed(0)}%',
                     style: const TextStyle(fontSize: 14),
                   ),
                   const SizedBox(height: 12),
